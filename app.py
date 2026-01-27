@@ -9,16 +9,20 @@ st.title("💰 Personal Payment Manager")
 menu = st.sidebar.radio("Menu", ["Dashboard", "New Transaction", "Add Person", "History", "Manage Accounts"])
 
 # --- PAGE 1: DASHBOARD ---
+# --- PAGE 1: DASHBOARD ---
 if menu == "Dashboard":
     st.subheader("My Accounts")
     df_accounts = db.get_all_accounts()
     
-    # Display accounts as metric cards
-    cols = st.columns(len(df_accounts))
-    for index, row in df_accounts.iterrows():
-        with cols[index % 3]: # prevent error if too many accounts
-            st.metric(label=row['account_name'], value=f"₹{row['balance']:,.2f}")
-            
+    # CHECK IF EMPTY BEFORE CREATING COLUMNS
+    if not df_accounts.empty:
+        cols = st.columns(len(df_accounts))
+        for index, row in df_accounts.iterrows():
+            with cols[index]: 
+                st.metric(label=row['account_name'], value=f"₹{row['balance']:,.2f}")
+    else:
+        st.warning("No accounts found! Please add an account.")
+
     st.write("---")
     st.subheader("All Contacts")
     st.dataframe(db.get_all_people())
@@ -113,4 +117,5 @@ elif menu == "Manage Accounts":
     
     st.write("---")
     st.subheader("Existing Accounts")
+
     st.dataframe(db.get_all_accounts())
