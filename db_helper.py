@@ -91,4 +91,70 @@ def create_new_account(account_name, initial_balance):
     except Exception as e:
         return False, str(e)
     finally:
+
         conn.close()
+def get_transaction_details(trans_id):
+    conn = get_connection()
+    # We need to fetch the account_id and amount to know what to revert
+    df = pd.read_sql("""
+        SELECT transaction_id, amount, transaction_type, my_account_id, person_id, note 
+        FROM transactions 
+        WHERE transaction_id = %s
+    """, conn, params=(trans_id,))
+    conn.close()
+    return df.iloc[0] if not df.empty else None
+
+def delete_transaction(trans_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # 1. Get details BEFORE deleting so we can revert the balance
+        cur.execute("SELECT amount, transaction_type, my_account_id FROM transactions WHERE transaction_id=%s", (trans_id,))
+        data = cur.fetchone()
+        
+        if not data:
+            return False, "Transaction not found"
+            
+        amount, trans_type, account_id = data
+        
+        # 2. Revert the Balance
+        if trans_type == 'PAID':
+            # If we paid money, deleting it means we get the money back
+            cur.execute("UPDATE my_account SET balance = balance + %s WHERE account_id=%s", (amount, account_id))
+        elif trans_type == 'RECEIVED':
+            # If we received money, deleting it means we remove that money
+            cur.execute("UPDATE my_account SET balance = balance - %s WHERE account_id=%s", (amount, account_id))
+            
+        # 3. Delete the record
+        cur.execute("DELETE FROM transactions WHERE transaction_id=%s", (trans_id,))
+        conn.commit()
+        return True, "✅ Transaction deleted and balance reverted."
+    
+    except Exception as e:
+        return False, str(e)
+    finally:
+        conn.close()
+
+def update_transaction(trans_id, new_amount, new_note):
+    # To edit safely, we first DELETE (revert balance), then create a NEW one.
+    # This prevents math errors.
+    
+    # 1. Get old data
+    old_trans = get_transaction_details(trans_id)
+    if old_trans is None:
+        return False, "Transaction not found"
+        
+    # 2. Delete old transaction (this fixes the balance automatically)
+    success, msg = delete_transaction(trans_id)
+    if not success:
+        return False, "Failed to revert old transaction: " + msg
+        
+    # 3. Add new transaction (this applies the new balance)
+    # We reuse the original account and person, just updating amount/note
+    return add_transaction(
+        int(old_trans['my_account_id']), 
+        int(old_trans['person_id']), 
+        new_amount, 
+        new_note, 
+        old_trans['transaction_type']
+    )
