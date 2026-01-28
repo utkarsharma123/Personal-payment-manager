@@ -78,23 +78,71 @@ elif menu == "Add Person":
             else:
                 st.error(msg)
 
-# --- PAGE 4: HISTORY ---
+# --- PAGE 4: HISTORY & MANAGEMENT ---
 elif menu == "History":
-    st.subheader("📜 Person History")
+    st.subheader("📜 Transaction History & Management")
     
+    # 1. Select Person
     people = db.get_all_people()
     people_map = dict(zip(people['person_name'], people['person_id']))
+    search_person = st.selectbox("Select Person", list(people_map.keys()))
     
-    search_person = st.selectbox("Select Person to view history", list(people_map.keys()))
+    p_id = people_map[search_person]
     
-    if st.button("Show History"):
-        p_id = people_map[search_person]
-        history_df = db.get_person_history(p_id)
+    # 2. Show Table (Include IDs now so user can see them)
+    # We create a custom query here to ensure we get IDs
+    conn = db.get_connection()
+    history_df = pd.read_sql("""
+        SELECT t.transaction_id, t.transaction_time, t.amount, t.transaction_type, t.note, a.account_name
+        FROM transactions t
+        JOIN my_account a ON t.my_account_id = a.account_id
+        WHERE t.person_id = %s
+        ORDER BY t.transaction_time DESC
+    """, conn, params=(p_id,))
+    conn.close()
+    
+    if not history_df.empty:
+        st.dataframe(history_df)
         
-        if not history_df.empty:
-            st.dataframe(history_df)
-        else:
-            st.info("No transactions found for this person.")
+        st.write("---")
+        st.subheader("🖊️ Edit or Delete")
+        
+        # 3. Selection Box
+        # Create a list of IDs for the dropdown: "ID - Amount - Note"
+        options = history_df.apply(lambda x: f"{x['transaction_id']} - ₹{x['amount']} ({x['note']})", axis=1)
+        selected_option = st.selectbox("Select Transaction to Modify", options)
+        
+        # Extract the ID from the string "12 - ₹500 (Dinner)" -> 12
+        selected_trans_id = int(selected_option.split(" - ")[0])
+        
+        col1, col2 = st.columns(2)
+        
+        # DELETE BUTTON
+        with col1:
+            if st.button("🗑️ Delete Transaction", type="primary"):
+                success, msg = db.delete_transaction(selected_trans_id)
+                if success:
+                    st.success(msg)
+                    st.rerun() # Refresh page to show new balance
+                else:
+                    st.error(msg)
+        
+        # EDIT FORM
+        with col2:
+            with st.expander("Edit Amount/Note"):
+                with st.form("edit_form"):
+                    new_amount = st.number_input("New Amount", min_value=1.0)
+                    new_note = st.text_input("New Note")
+                    if st.form_submit_button("Update Transaction"):
+                        success, msg = db.update_transaction(selected_trans_id, new_amount, new_note)
+                        if success:
+                            st.success("✅ Transaction Updated!")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                            
+    else:
+        st.info("No transactions found for this person.")
 # --- PAGE 5: MANAGE ACCOUNTS ---
 elif menu == "Manage Accounts":
     st.subheader("🏦 Add a New Account")
@@ -119,3 +167,4 @@ elif menu == "Manage Accounts":
     st.subheader("Existing Accounts")
 
     st.dataframe(db.get_all_accounts())
+
